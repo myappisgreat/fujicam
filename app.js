@@ -20,7 +20,7 @@ const fs = `#version 300 es
 precision highp float; precision highp sampler3D;
 in vec2 uv; out vec4 color;
 uniform sampler2D image; uniform sampler3D lut;
-uniform float size, exposure, grain; uniform vec2 crop, resolution;
+uniform float size, exposure, grain, temperature, tint; uniform vec2 crop, resolution;
 uniform bool mono, mirror;
 vec3 linearize(vec3 c){return mix(c/12.92,pow((c+.055)/1.055,vec3(2.4)),step(vec3(.04045),c));}
 vec3 flog(vec3 c){return mix(8.735631*c+.092864,.344676*log(max(.555556*c+.009468,vec3(.000001)))/log(10.)+.790453,step(vec3(.00089),c));}
@@ -28,6 +28,9 @@ void main(){
  vec2 p=(uv-.5)*crop+.5; if(mirror)p.x=1.-p.x;
  vec3 rgb=texture(image,p).rgb;
  vec3 lin=linearize(rgb)*exp2(exposure);
+ // Relative creative white balance; 0 is neutral, not a Kelvin measurement.
+ vec3 balance=exp2(vec3(.5*temperature+.2*tint,-.35*tint,-.5*temperature+.2*tint));
+ lin*=balance;
  // Linear sRGB / BT.709 -> BT.2020 (F-Gamut primaries).
  vec3 wide=mat3(.627404,.069097,.016391,.329283,.919540,.088013,.043313,.011362,.895595)*lin;
  vec3 pos=clamp(flog(wide),0.,1.);
@@ -48,7 +51,7 @@ function setup() {
  gl.useProgram(program);
  const buffer=gl.createBuffer(); gl.bindBuffer(gl.ARRAY_BUFFER,buffer);gl.bufferData(gl.ARRAY_BUFFER,new Float32Array([-1,-1,1,-1,-1,1,-1,1,1,-1,1,1]),gl.STATIC_DRAW);
  const location=gl.getAttribLocation(program,'position');gl.enableVertexAttribArray(location);gl.vertexAttribPointer(location,2,gl.FLOAT,false,0,0);
- uniforms=Object.fromEntries(['image','lut','size','exposure','grain','crop','resolution','mono','mirror'].map(key=>[key,gl.getUniformLocation(program,key)]));
+ uniforms=Object.fromEntries(['image','lut','size','exposure','grain','temperature','tint','crop','resolution','mono','mirror'].map(key=>[key,gl.getUniformLocation(program,key)]));
  imageTexture=gl.createTexture();gl.activeTexture(gl.TEXTURE0);gl.bindTexture(gl.TEXTURE_2D,imageTexture);
  gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_MIN_FILTER,gl.LINEAR);gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_MAG_FILTER,gl.LINEAR);
  gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_WRAP_S,gl.CLAMP_TO_EDGE);gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_WRAP_T,gl.CLAMP_TO_EDGE);
@@ -91,6 +94,7 @@ function render(exporting=false) {
  gl.texImage2D(gl.TEXTURE_2D,0,gl.RGBA,gl.RGBA,gl.UNSIGNED_BYTE,source);
  gl.uniform2f(uniforms.crop,Math.min(1,aspect/(sw/sh)),Math.min(1,(sw/sh)/aspect));
  gl.uniform1f(uniforms.exposure,Number($('ev').value));gl.uniform1f(uniforms.grain,Number($('grain').value)/500);
+ gl.uniform1f(uniforms.temperature,Number($('temperature').value)/100);gl.uniform1f(uniforms.tint,Number($('tint').value)/100);
  gl.uniform2f(uniforms.resolution,canvas.width,canvas.height);gl.uniform1i(uniforms.mono,selected==='MONO');
  gl.uniform1i(uniforms.mirror,source===video&&facing==='user');gl.drawArrays(gl.TRIANGLES,0,6);
 }
@@ -123,7 +127,11 @@ $('file').onchange=async event=>{
  try{image.src=url;await image.decode();if(epoch!==importEpoch)return;stopCamera();source=image;$('welcome').hidden=true;$('mode').textContent='PHOTO';$('shutter').disabled=false;render();status('照片已載入，調整底片後按快門儲存。');}
  catch{status('無法讀取照片，請使用 JPEG、PNG 或 WebP。');}finally{URL.revokeObjectURL(url);event.target.value='';}
 };
-for(const id of ['ev','grain'])$(id).oninput=()=>{$(`${id}-value`).value=id==='ev'?Number($(id).value).toFixed(1):$(id).value;if(source!==video)render();};
+for(const id of ['ev','grain','temperature','tint'])$(id).oninput=()=>{
+ const value=Number($(id).value);
+ $(`${id}-value`).value=id==='ev'?value.toFixed(1):id==='grain'?String(value):`${value>0?'+':''}${value}`;
+ if(source!==video)render();
+};
 $('shutter').onclick=async()=>{
  if(!source||busy)return;busy=true;$('shutter').disabled=true;cancelAnimationFrame(frame);
  try{render(true);$('flash').classList.remove('fire');void $('flash').offsetWidth;$('flash').classList.add('fire');
@@ -144,5 +152,3 @@ window.addEventListener('beforeinstallprompt',event=>{event.preventDefault();def
 $('install').onclick=async()=>{if(deferredInstall){await deferredInstall.prompt();deferredInstall=null;$('install').hidden=true;}};
 if('serviceWorker' in navigator)navigator.serviceWorker.register('./sw.js').catch(()=>status('離線快取尚未完成，仍可在線使用。'));
 try{setup();await selectFilm('ETERNA');}catch(error){status(error.message);$('start').disabled=true;}
-
-

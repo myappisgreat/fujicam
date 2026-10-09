@@ -16,6 +16,17 @@ const server=http.createServer((req,res)=>{const name=decodeURIComponent(req.url
  if(pixels<10)throw Error('Blank render');await page.screenshot({path:'tests/capture.png',fullPage:true});
  await page.click('#close-result');await page.click('#flip');await page.waitForFunction(()=>!document.querySelector('#shutter').disabled);
  await page.setInputFiles('#file','assets/icon-512.png');await page.waitForFunction(()=>document.querySelector('#mode').textContent==='PHOTO');
+ const sample=()=>page.evaluate(()=>{const canvas=document.querySelector('#preview');const gl=canvas.getContext('webgl2');const pixel=new Uint8Array(4);gl.readPixels(20,20,1,1,gl.RGBA,gl.UNSIGNED_BYTE,pixel);return Array.from(pixel);});
+ const neutral=await sample();
+ for(const id of ['temperature','tint']){
+  await page.locator('#'+id).fill('100');await page.locator('#'+id).dispatchEvent('input');
+  const adjusted=await sample();if(adjusted.slice(0,3).every((v,i)=>v===neutral[i]))throw Error(id+' did not change pixels');
+  if(await page.locator('#'+id+'-value').textContent()!=='+100')throw Error(id+' label mismatch');
+  await page.locator('#'+id).fill('0');await page.locator('#'+id).dispatchEvent('input');
+  if(JSON.stringify(await sample())!==JSON.stringify(neutral))throw Error(id+' neutral reset failed');
+ }
+ await page.locator('#temperature').fill('75');await page.locator('#temperature').dispatchEvent('input');
+ await page.locator('#tint').fill('-50');await page.locator('#tint').dispatchEvent('input');
  await page.click('[data-id="MONO"]');await page.waitForFunction(()=>document.querySelector('[data-id="MONO"]').classList.contains('active'));
  await page.click('#shutter');await page.waitForSelector('#result[open]');await page.waitForFunction(()=>document.querySelector('#photo').naturalHeight===512);
  const monochrome=await page.evaluate(()=>{const c=document.createElement('canvas');c.width=10;c.height=10;const ctx=c.getContext('2d');ctx.drawImage(document.querySelector('#photo'),0,0,10,10);const d=ctx.getImageData(0,0,10,10).data;for(let i=0;i<d.length;i+=4)if(Math.abs(d[i]-d[i+1])>2||Math.abs(d[i+1]-d[i+2])>2)return false;return true;});
@@ -25,6 +36,3 @@ const server=http.createServer((req,res)=>{const name=decodeURIComponent(req.url
  await context.setOffline(false);await page.setViewportSize({width:1280,height:900});await page.screenshot({path:'tests/desktop.png',fullPage:true});
  if(errors.length)throw Error(errors.join('\n'));console.log(JSON.stringify({passed:true,photo,pixelValues:pixels,monochrome,offline:true,errors}));await browser.close();server.close();
 })().catch(e=>{console.error(e);server.close();process.exit(1)});
-
-
-
