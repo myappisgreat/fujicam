@@ -1,0 +1,1 @@
+{"name":"fuji-room","private":true,"type":"module","scripts":{"test":"node tests/lut.test.mjs"}}
